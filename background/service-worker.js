@@ -80,23 +80,44 @@ function checkWords(words) {
 // Käynnistä Voikko heti service workerin käynnistyessä
 initVoikko().catch(err => console.error('[Voikko] Init-virhe:', err));
 
+// Lataa PNG-tiedosto ImageDataksi OffscreenCanvasin kautta.
+// Tarvitaan koska chrome.action.setIcon({ path }) epäonnistuu
+// service workerin käynnistysvaiheessa ("Failed to fetch").
+async function loadImageData(filename, size) {
+  const url = chrome.runtime.getURL(filename);
+  const response = await fetch(url);
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
+  const canvas = new OffscreenCanvas(size, size);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, size, size);
+  return canvas.getContext('2d').getImageData(0, 0, size, size);
+}
+
 // Päivitä ikoni vastaamaan globaalia tilaa
 async function updateIcon() {
   const result = await chrome.storage.local.get('globalEnabled');
   const enabled = result.globalEnabled !== false;
-  chrome.action.setIcon({
-    path: {
-      16: enabled ? 'icons/icon-16.png' : 'icons/icon-off-16.png',
-      32: enabled ? 'icons/icon-32.png' : 'icons/icon-off-32.png',
-      48: enabled ? 'icons/icon-48.png' : 'icons/icon-off-48.png',
-    }
-  });
+  const prefix = enabled ? 'icons/icon' : 'icons/icon-off';
+
+  try {
+    const [img16, img32, img48] = await Promise.all([
+      loadImageData(`${prefix}-16.png`, 16),
+      loadImageData(`${prefix}-32.png`, 32),
+      loadImageData(`${prefix}-48.png`, 48),
+    ]);
+    await chrome.action.setIcon({ imageData: { 16: img16, 32: img32, 48: img48 } });
+  } catch (err) {
+    console.warn('[Voikko] Ikonin päivitys epäonnistui:', err.message);
+  }
+
   chrome.action.setTitle({
     title: enabled ? 'Suomen oikoluku — käytössä' : 'Suomen oikoluku — pois käytöstä'
   });
 }
 
-updateIcon();
+// Päivitä ikoni kun Chrome käynnistyy tai laajennus asennetaan
+chrome.runtime.onStartup.addListener(updateIcon);
+chrome.runtime.onInstalled.addListener(updateIcon);
 
 // Kuuntele viestejä content scriptiltä
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
