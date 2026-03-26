@@ -14,18 +14,8 @@ div.voikko-overlay {
   white-space: pre-wrap;
   word-break: break-word;
   overflow: hidden;
-  color: transparent;   /* teksti läpinäkyvä — vain alleviivaukset näkyvät */
   background: transparent;
   z-index: 9999;
-  /* Estä overlayä saamasta focusta tai sekoittamasta accessibilitya */
   user-select: none;
   -webkit-user-select: none;
-}
-
-/* Overlay: virheelliset sanat näkyvät läpinäkyvän tekstin kautta alleviivattuna */
-div.voikko-overlay mark.voikko-err {
-  color: transparent;
-  background: none;
-  text-decoration: underline wavy red;
-  text-decoration-skip-ink: none;
 }

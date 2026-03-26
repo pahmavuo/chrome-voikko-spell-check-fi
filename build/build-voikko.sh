@@ -84,7 +84,7 @@ emcc \
   "$LIBVOIKKO_SRC/.libs/libvoikko.a" \
   -o "$OUTPUT_DIR/libvoikko.js" \
   -s EXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS" \
-  -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","stringToUTF8","lengthBytesUTF8"]' \
+  -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","stringToUTF8","lengthBytesUTF8","setValue","getValue"]' \
   -s ALLOW_MEMORY_GROWTH=1 \
   -s INITIAL_MEMORY=33554432 \
   -s ENVIRONMENT=worker \

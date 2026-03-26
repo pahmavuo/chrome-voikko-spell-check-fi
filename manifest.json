@@ -11,8 +11,7 @@
   "host_permissions": ["<all_urls>"],
 
   "background": {
-    "service_worker": "background/service-worker.js",
-    "type": "module"
+    "service_worker": "background/service-worker.js"
   },
 
   "content_scripts": [
@@ -27,6 +26,10 @@
   "action": {
     "default_popup": "popup/popup.html",
     "default_title": "Suomen oikoluku"
+  },
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
 
   "web_accessible_resources": [

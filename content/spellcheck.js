@@ -8,6 +8,10 @@
   if (window.__voikkoSpellcheck) return;
   window.__voikkoSpellcheck = true;
 
+  // --- Debug ---
+  const DEBUG = true;
+  function log(...args) { if (DEBUG) console.log('[Voikko]', ...args); }
+
   // --- Konfiguraatio ---
   const DEBOUNCE_MS = 400;
   const MIN_WORD_LENGTH = 2;
@@ -94,7 +98,7 @@
     overlay.style.pointerEvents = 'none';
     overlay.style.whiteSpace = 'pre-wrap';
     overlay.style.wordBreak = 'break-word';
-    overlay.style.color = 'transparent';
+    overlay.style.color = 'transparent';   // overlay-teksti näkymätön — vain alleviivaukset näkyvät
     overlay.style.zIndex = '9999';
 
     for (const prop of COPY_STYLES) {
@@ -301,8 +305,11 @@
     const text = el.value !== undefined ? el.value : getTextContent(el);
     const wordPositions = extractWordPositions(text);
     const words = wordPositions.map(w => w.word);
+    log('triggerCheck:', words.length, 'sanaa tarkistettavana');
 
     const results = await checkWords(words);
+    const errors = results.filter(r => !r.correct);
+    log('tulos:', errors.length, 'virhettä:', errors.map(r => r.word));
 
     if (info.type === 'textarea' || info.type === 'input') {
       if (info.overlay) {
@@ -341,17 +348,13 @@
       // Synkronoi koko jos textarea resizataan
       new ResizeObserver(() => syncOverlayStyles(el, overlay)).observe(el);
 
-      // Tee tekstialueesta läpinäkyvä (overlay näyttää tekstin)
-      el.style.color = 'transparent';
-      el.style.caretColor = window.getComputedStyle(el).color || 'black';
-      el.style.webkitTextFillColor = 'transparent';
+      // Textarea-teksti pysyy normaalina — overlay lisää vain alleviivaukset päälle
+      log('textarea liitetty');
 
     } else if (el.tagName === 'INPUT') {
       type = 'input';
       overlay = createOverlay(el);
-      el.style.color = 'transparent';
-      el.style.caretColor = window.getComputedStyle(el).color || 'black';
-      el.style.webkitTextFillColor = 'transparent';
+      log('input liitetty');
 
     } else {
       type = 'contenteditable';
@@ -548,6 +551,7 @@
   }
 
   // Käynnistä
+  log('content script ladattu, sivu:', location.href);
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

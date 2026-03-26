@@ -17,9 +17,8 @@ async function initVoikko() {
   initPromise = (async () => {
     console.log('[Voikko] Ladataan WASM-moduuli...');
 
-    // Lataa Emscripten-generoitu libvoikko.js service workeriin
-    const wasmUrl = chrome.runtime.getURL('voikko/libvoikko.js');
-    await import(wasmUrl);
+    // importScripts on ainoa tapa ladata skripti service workerissa
+    importScripts(chrome.runtime.getURL('voikko/libvoikko.js'));
 
     // LibVoikko on nyt globaalissa scopessa (EXPORT_NAME=LibVoikko)
     // Alustetaan moduuli — sanakirjat on pakattu libvoikko.data:aan
@@ -33,14 +32,13 @@ async function initVoikko() {
     fnFreeCstrArray = libVoikko.cwrap('voikkoFreeCstrArray', null, ['number']);
 
     // Alusta Voikko suomelle
-    // voikkoInit(language, path) — path null koska sanakirja on preloaded
-    const errPtr = libVoikko._malloc(4);
-    libVoikko.setValue(errPtr, 0, 'i32');
+    // C-signatuuri: voikkoInit(const char **error, const char *langcode, const char *path)
+    // Sanakirja on preloaded WASM-tiedostojärjestelmään polkuun /usr/lib/voikko
     const handle = libVoikko.ccall(
       'voikkoInit',
       'number',
-      ['string', 'string'],
-      ['fi', null]
+      ['number', 'string', 'string'],
+      [0, 'fi', '/usr/lib/voikko']
     );
 
     if (!handle) {
