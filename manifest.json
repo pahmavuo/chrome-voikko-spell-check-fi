@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Suomen oikoluku (Voikko)",
+  "version": "0.1.0",
+  "description": "Paikallinen suomenkielinen oikoluku Voikko-kirjastolla — ei lähetä tekstiä verkkoon",
+
+  "permissions": [
+    "storage",
+    "contextMenus"
+  ],
+  "host_permissions": ["<all_urls>"],
+
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/spellcheck.js"],
+      "css": ["styles/spellcheck.css"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Suomen oikoluku"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["voikko/libvoikko.js", "voikko/libvoikko.wasm", "voikko/libvoikko.data"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

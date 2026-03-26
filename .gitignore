@@ -1,0 +1,10 @@
+# Emscripten build-tulokset (generoidaan build-voikko.sh:lla)
+voikko/libvoikko.js
+voikko/libvoikko.wasm
+voikko/libvoikko.data
+
+# Build-hakemiston väliaikaiset tiedostot
+build/tmp/
+
+# OS
+.DS_Store

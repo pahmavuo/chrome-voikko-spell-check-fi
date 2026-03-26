@@ -1,0 +1,3 @@
+# Tämä hakemisto on tarkoitettu Emscripten-käännetyille Voikko-tiedostoille.
+# Tiedostot generoidaan komennolla: ./build/build-voikko.sh
+# Älä lisää libvoikko.js / libvoikko.wasm / libvoikko.data versionhallintaan.
