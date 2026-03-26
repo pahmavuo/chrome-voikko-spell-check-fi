@@ -26,6 +26,10 @@
   let contextSuggestions = [];
 
   // --- Apufunktiot ---
+  // Huom: extractWordPositions, escapeHtml, escapeAttr ja buildOverlayHtml
+  // ovat myös lib/text-utils.js:ssä (yksikkötestejä varten).
+  // Content scriptissä ne on kopioitu tänne koska Chrome-laajennukset
+  // eivät tue CommonJS require():a content scripteissä.
 
   // Pilko teksti sanoiksi säilyttäen positiot
   function extractWordPositions(text) {
