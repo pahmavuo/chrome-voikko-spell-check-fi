@@ -80,6 +80,24 @@ function checkWords(words) {
 // Käynnistä Voikko heti service workerin käynnistyessä
 initVoikko().catch(err => console.error('[Voikko] Init-virhe:', err));
 
+// Päivitä ikoni vastaamaan globaalia tilaa
+async function updateIcon() {
+  const result = await chrome.storage.local.get('globalEnabled');
+  const enabled = result.globalEnabled !== false;
+  chrome.action.setIcon({
+    path: {
+      16: enabled ? 'icons/icon-16.png' : 'icons/icon-off-16.png',
+      32: enabled ? 'icons/icon-32.png' : 'icons/icon-off-32.png',
+      48: enabled ? 'icons/icon-48.png' : 'icons/icon-off-48.png',
+    }
+  });
+  chrome.action.setTitle({
+    title: enabled ? 'Suomen oikoluku — käytössä' : 'Suomen oikoluku — pois käytöstä'
+  });
+}
+
+updateIcon();
+
 // Kuuntele viestejä content scriptiltä
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'CHECK_WORDS') {
@@ -102,6 +120,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'PING') {
     sendResponse({ ready: voikko !== null });
+    return false;
+  }
+
+  if (msg.type === 'SET_GLOBAL_ENABLED') {
+    updateIcon();
     return false;
   }
 });

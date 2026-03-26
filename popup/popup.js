@@ -1,69 +1,85 @@
 // popup/popup.js
 
 (async () => {
-  const toggle = document.getElementById('site-toggle');
-  const statusDot = document.getElementById('status-dot');
+  const globalToggle = document.getElementById('global-toggle');
+  const siteToggle = document.getElementById('site-toggle');
+  const globalStatus = document.getElementById('global-status');
   const siteNameEl = document.getElementById('site-name');
   const wordListEl = document.getElementById('word-list');
+  const header = document.getElementById('header');
+  const content = document.getElementById('content');
 
   // Hae nykyinen sivu
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   let hostname = '';
-  try {
-    hostname = new URL(tab.url).hostname;
-  } catch (e) {
-    hostname = '';
-  }
+  try { hostname = new URL(tab.url).hostname; } catch (e) {}
   siteNameEl.textContent = hostname || '—';
 
-  // Lataa tila
-  const disabledKey = `disabled_${hostname}`;
-  const result = await chrome.storage.local.get([disabledKey, 'userWords']);
+  const siteKey = `disabled_site_${hostname}`;
+  const result = await chrome.storage.local.get(['globalEnabled', siteKey, 'userWords']);
 
-  const isDisabled = result[disabledKey] === true;
-  toggle.checked = !isDisabled;
-  statusDot.classList.toggle('off', isDisabled);
+  // Globaali tila (oletus: päällä)
+  const globalEnabled = result.globalEnabled !== false;
+  globalToggle.checked = globalEnabled;
+  updateGlobalUi(globalEnabled);
 
-  // Päivitä tila togglea muutettaessa
-  toggle.addEventListener('change', async () => {
-    const disabled = !toggle.checked;
-    statusDot.classList.toggle('off', disabled);
-    await chrome.storage.local.set({ [disabledKey]: disabled });
+  // Sivukohtainen tila (oletus: päällä)
+  const siteEnabled = result[siteKey] !== false;
+  siteToggle.checked = siteEnabled;
 
+  // Globaali toggle
+  globalToggle.addEventListener('change', async () => {
+    const enabled = globalToggle.checked;
+    await chrome.storage.local.set({ globalEnabled: enabled });
+    updateGlobalUi(enabled);
+    await chrome.runtime.sendMessage({ type: 'SET_GLOBAL_ENABLED', enabled });
     // Reload sivu jotta muutos astuu voimaan
-    if (tab.id) {
-      chrome.tabs.reload(tab.id);
-    }
+    if (tab.id) chrome.tabs.reload(tab.id);
   });
 
-  // Näytä oma sanalistta
+  // Sivukohtainen toggle
+  siteToggle.addEventListener('change', async () => {
+    const enabled = siteToggle.checked;
+    await chrome.storage.local.set({ [siteKey]: enabled });
+    if (tab.id) chrome.tabs.reload(tab.id);
+  });
+
+  function updateGlobalUi(enabled) {
+    if (enabled) {
+      header.style.background = '#1a73e8';
+      globalStatus.textContent = 'Käytössä';
+      content.classList.remove('disabled');
+    } else {
+      header.style.background = '#9aa0a6';
+      globalStatus.textContent = 'Pois käytöstä';
+      content.classList.add('disabled');
+    }
+  }
+
+  // Sanalistta
   function renderWordList(words) {
     wordListEl.innerHTML = '';
     if (!words || words.length === 0) {
       wordListEl.innerHTML = '<div class="empty-words">Ei omia sanoja</div>';
       return;
     }
-
-    for (const word of words.sort()) {
+    for (const word of [...words].sort()) {
       const item = document.createElement('div');
       item.className = 'word-item';
-
-      const wordSpan = document.createElement('span');
-      wordSpan.textContent = word;
-
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'remove-word';
-      removeBtn.textContent = '×';
-      removeBtn.title = `Poista "${word}" sanalistasta`;
-      removeBtn.addEventListener('click', async () => {
+      const span = document.createElement('span');
+      span.textContent = word;
+      const btn = document.createElement('button');
+      btn.className = 'remove-word';
+      btn.textContent = '×';
+      btn.title = `Poista "${word}"`;
+      btn.addEventListener('click', async () => {
         const r = await chrome.storage.local.get('userWords');
         const newWords = (r.userWords || []).filter(w => w !== word);
         await chrome.storage.local.set({ userWords: newWords });
         renderWordList(newWords);
       });
-
-      item.appendChild(wordSpan);
-      item.appendChild(removeBtn);
+      item.appendChild(span);
+      item.appendChild(btn);
       wordListEl.appendChild(item);
     }
   }

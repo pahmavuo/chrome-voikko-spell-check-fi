@@ -484,9 +484,11 @@
   // --- Sivuston pois päältä kytkeminen ---
 
   async function isDisabledForSite() {
-    const key = `disabled_${location.hostname}`;
-    const result = await chrome.storage.local.get(key);
-    return result[key] === true;
+    const siteKey = `disabled_site_${location.hostname}`;
+    const result = await chrome.storage.local.get(['globalEnabled', siteKey]);
+    if (result.globalEnabled === false) return true;
+    if (result[siteKey] === false) return true;
+    return false;
   }
 
   // --- Alustus ---
