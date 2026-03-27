@@ -7,7 +7,7 @@ Käyttää Voikko-kirjastoa (WASM) — ei lähetä tekstiä verkkoon.
 
 ### JavaScript-testit
 
-Vaatii Node.js (LTS, esim. 22.x):
+Vaatii Node.js (LTS, esim. 22.x) — tarvitaan vain testien ajamiseen:
 
 ```bash
 npm install
