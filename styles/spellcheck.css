@@ -1,10 +1,16 @@
-/* Virhemerkintä — punainen aaltoviiva */
+/* Virhemerkintä — punainen aaltoviiva (textarea/input overlay) */
 mark.voikko-err {
   background: none;
   color: inherit;
   text-decoration: underline wavy red;
   text-decoration-skip-ink: none;
   cursor: text;
+}
+
+/* Virhemerkintä contenteditable-elementeille (CSS Custom Highlight API) */
+::highlight(voikko-err) {
+  text-decoration: underline wavy red;
+  text-decoration-skip-ink: none;
 }
 
 /* Overlay textarea/input-elementtien päällä */

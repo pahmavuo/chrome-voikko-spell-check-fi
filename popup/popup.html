@@ -144,7 +144,18 @@
       color: #9aa0a6;
       display: flex;
       justify-content: space-between;
+      align-items: center;
     }
+    #debug-btn {
+      background: none;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      color: #5f6368;
+    }
+    #debug-btn:hover { background: #f1f3f4; }
 
     /* Koko sisältö pois päältä kun globaali off */
     .content.disabled { opacity: 0.4; pointer-events: none; }
@@ -187,9 +198,10 @@
   </div>
 
   <div class="footer">
-    <span>Voikko WASM</span>
-    <span>GPL-3.0</span>
+    <span>Voikko WASM · GPL-3.0</span>
+    <button id="debug-btn" title="Kopioi debug-tiedot leikepöydälle">🔍 Debug</button>
   </div>
+  <div id="debug-status" style="display:none; padding:4px 16px 8px; font-size:11px; color:#1a73e8;"></div>
 
   <script src="popup.js"></script>
 </body>

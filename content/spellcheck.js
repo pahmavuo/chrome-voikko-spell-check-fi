@@ -146,33 +146,68 @@
     overlay.scrollLeft = el.scrollLeft;
   }
 
-  // --- ContentEditable ---
+  // --- ContentEditable (CSS Custom Highlight API) ---
 
   function getTextContent(el) {
     return el.innerText || el.textContent || '';
   }
 
+  // Tallennetaan virhe-ranget elementeittäin kontekstivalikkoa varten
+  // el → Map<word, { suggestions, ranges[] }>
+  const ceErrorRanges = new WeakMap();
+
+  const highlightSupported = typeof CSS !== 'undefined' && CSS.highlights;
+
   function updateContentEditable(el, errors) {
-    // Tallenna kursori ennen muutoksia
-    const selection = window.getSelection();
-    const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    const cursorOffset = range ? getAbsoluteOffset(el, range.startContainer, range.startOffset) : -1;
-
-    // Poista vanhat virhemerkit (palauta teksti normaaliksi)
-    removeOldMarks(el);
-
-    if (errors.length === 0) return;
-
     const errorSet = new Map(errors.filter(r => !r.correct).map(r => [r.word, r.suggestions]));
-    if (errorSet.size === 0) return;
 
-    // Merkitse virheelliset sanat
-    markErrorsInNode(el, errorSet);
-
-    // Palauta kursori
-    if (cursorOffset >= 0) {
-      restoreCursor(el, cursorOffset);
+    if (!highlightSupported) {
+      // Fallback: yritä mark-injektio (ei toimi ProseMirrorissa mutta toimii yksinkertaisissa ce-elementeissä)
+      updateContentEditableFallback(el, errorSet);
+      return;
     }
+
+    // Kerää Range-objektit kaikille virheellisille sanoille
+    const wordRanges = new Map(); // word → { suggestions, ranges[] }
+    const allRanges = [];
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent;
+      const wordPositions = extractWordPositions(text);
+      for (const { word, start, end } of wordPositions) {
+        if (!errorSet.has(word)) continue;
+        const range = new Range();
+        range.setStart(node, start);
+        range.setEnd(node, end);
+        allRanges.push(range);
+        if (!wordRanges.has(word)) {
+          wordRanges.set(word, { suggestions: errorSet.get(word), ranges: [] });
+        }
+        wordRanges.get(word).ranges.push(range);
+      }
+    }
+
+    ceErrorRanges.set(el, wordRanges);
+
+    // Päivitä highlight (kaikki virheet yhteen nimeen)
+    if (allRanges.length > 0) {
+      CSS.highlights.set('voikko-err', new Highlight(...allRanges));
+    } else {
+      CSS.highlights.delete('voikko-err');
+    }
+  }
+
+  function clearContentEditableHighlights() {
+    if (highlightSupported) CSS.highlights.delete('voikko-err');
+  }
+
+  // Fallback yksinkertaisille contenteditable-elementeille (ei ProseMirror)
+  function updateContentEditableFallback(el, errorSet) {
+    removeOldMarks(el);
+    if (errorSet.size === 0) return;
+    markErrorsInNode(el, errorSet);
   }
 
   function removeOldMarks(el) {
@@ -185,94 +220,34 @@
   }
 
   function markErrorsInNode(rootEl, errorSet) {
-    const walker = document.createTreeWalker(
-      rootEl,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: (node) => {
-          // Ohita jo merkityt solmut
-          if (node.parentElement.classList.contains(ERROR_CLASS)) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      }
-    );
+    const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.parentElement.classList.contains(ERROR_CLASS)
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+    });
 
     const textNodes = [];
     let node;
-    while ((node = walker.nextNode())) {
-      textNodes.push(node);
-    }
+    while ((node = walker.nextNode())) textNodes.push(node);
 
     for (const textNode of textNodes) {
       const text = textNode.textContent;
-      const wordPositions = extractWordPositions(text);
-      if (wordPositions.length === 0) continue;
-
-      const errorWords = wordPositions.filter(({ word }) => errorSet.has(word));
+      const errorWords = extractWordPositions(text).filter(({ word }) => errorSet.has(word));
       if (errorWords.length === 0) continue;
 
-      // Rakenna uudet solmut tekstisolmun tilalle
       const fragment = document.createDocumentFragment();
       let lastIndex = 0;
-
       for (const { word, start, end } of errorWords) {
-        if (start > lastIndex) {
-          fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
-        }
-
+        if (start > lastIndex) fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
         const mark = document.createElement('mark');
         mark.className = ERROR_CLASS;
         mark.textContent = word;
-        const suggestions = errorSet.get(word);
         mark.dataset.word = word;
-        mark.dataset.suggestions = suggestions.slice(0, 6).join('|');
+        mark.dataset.suggestions = errorSet.get(word).slice(0, 6).join('|');
         fragment.appendChild(mark);
-
         lastIndex = end;
       }
-
-      if (lastIndex < text.length) {
-        fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
-      }
-
+      if (lastIndex < text.length) fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
       textNode.parentNode.replaceChild(fragment, textNode);
-    }
-  }
-
-  // Kursoripaikan laskeminen absoluuttisena offsettina koko elementin tekstistä
-  function getAbsoluteOffset(root, targetNode, targetOffset) {
-    let offset = 0;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      if (node === targetNode) return offset + targetOffset;
-      offset += node.textContent.length;
-    }
-    return -1;
-  }
-
-  function restoreCursor(root, absoluteOffset) {
-    let offset = 0;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      const len = node.textContent.length;
-      if (offset + len >= absoluteOffset) {
-        try {
-          const range = document.createRange();
-          range.setStart(node, absoluteOffset - offset);
-          range.collapse(true);
-          const selection = window.getSelection();
-          selection.removeAllRanges();
-          selection.addRange(range);
-        } catch (e) {
-          // Kursorin palautus epäonnistui — ei kriittinen
-        }
-        return;
-      }
-      offset += len;
     }
   }
 
@@ -389,25 +364,21 @@
 
   document.addEventListener('contextmenu', (e) => {
     const target = e.target;
+    contextWord = null;
+    contextSuggestions = [];
 
-    // Tarkista onko kohdistus virheellisen sanan päällä
+    // Tarkista onko kohdistus virheellisen sanan päällä (fallback mark-elementti)
     if (target.classList && target.classList.contains(ERROR_CLASS)) {
       contextWord = target.dataset.word;
       contextSuggestions = (target.dataset.suggestions || '').split('|').filter(Boolean);
     } else {
-      // Tarkista onko kursori textarea/input-elementissä virheellisen sanan kohdalla
-      contextWord = null;
-      contextSuggestions = [];
-
+      // textarea/input: hae sana kursoriposition perusteella
       const activeEl = document.activeElement;
       if (activeEl && trackedElements.has(activeEl) && activeEl.value !== undefined) {
         const cursorPos = activeEl.selectionStart;
-        const text = activeEl.value;
-        const wordPositions = extractWordPositions(text);
-
+        const wordPositions = extractWordPositions(activeEl.value);
         for (const { word, start, end } of wordPositions) {
           if (cursorPos >= start && cursorPos <= end) {
-            // Etsi virhe overlaysta
             const info = trackedElements.get(activeEl);
             if (info && info.overlay) {
               const mark = info.overlay.querySelector(`.${ERROR_CLASS}[data-word="${CSS.escape(word)}"]`);
@@ -417,6 +388,36 @@
               }
             }
             break;
+          }
+        }
+      }
+
+      // contenteditable: hae sana hiiren osoittimen kohdalta CSS Highlight rangeistä
+      if (!contextWord && highlightSupported) {
+        const caretRange = document.caretRangeFromPoint(e.clientX, e.clientY);
+        if (caretRange) {
+          // Etsi mikä tracked contenteditable-elementti on kyseessä
+          let ceEl = target;
+          while (ceEl && ceEl !== document.body) {
+            const info = trackedElements.get(ceEl);
+            if (info && info.type === 'contenteditable') break;
+            ceEl = ceEl.parentElement;
+          }
+          if (ceEl && trackedElements.has(ceEl)) {
+            const errorMap = ceErrorRanges.get(ceEl);
+            if (errorMap) {
+              for (const [word, { suggestions, ranges }] of errorMap) {
+                for (const range of ranges) {
+                  if (range.compareBoundaryPoints(Range.START_TO_END, caretRange) >= 0 &&
+                      range.compareBoundaryPoints(Range.END_TO_START, caretRange) <= 0) {
+                    contextWord = word;
+                    contextSuggestions = suggestions.slice(0, 6);
+                    break;
+                  }
+                }
+                if (contextWord) break;
+              }
+            }
           }
         }
       }
@@ -461,15 +462,12 @@
         }
       }
     } else if (activeEl.isContentEditable) {
-      // contenteditable: korvaa virheellinen sana
-      const selection = window.getSelection();
-      if (selection.rangeCount === 0) return;
-
-      // Etsi lähimpää virheellistä sanaa
-      const mark = activeEl.querySelector(`.${ERROR_CLASS}[data-word="${CSS.escape(contextWord)}"]`);
-      if (mark) {
-        const range = document.createRange();
-        range.selectNode(mark);
+      // contenteditable: korvaa virheellinen sana käyttäen tallennettuja Range-objekteja
+      const errorMap = ceErrorRanges.get(activeEl);
+      const entry = errorMap && errorMap.get(contextWord);
+      if (entry && entry.ranges.length > 0) {
+        const range = entry.ranges[0];
+        const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
         document.execCommand('insertText', false, suggestion);
@@ -509,6 +507,15 @@
     // Seuraa uusia elementtejä (SPA:t, dynaaminen sisältö)
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
+        if (mutation.type === 'attributes') {
+          // contenteditable-attribuutti lisätty olemassa olevaan elementtiin (esim. ProseMirror)
+          const el = mutation.target;
+          if (el.nodeType === Node.ELEMENT_NODE && el.isContentEditable) {
+            attachElement(el);
+          }
+          continue;
+        }
+
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
 
@@ -528,7 +535,7 @@
       }
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['contenteditable'] });
 
     // Kuuntele storage-muutoksia (esim. popup lisää sanan)
     chrome.storage.onChanged.addListener((changes) => {

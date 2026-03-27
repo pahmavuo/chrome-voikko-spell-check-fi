@@ -85,4 +85,32 @@
   }
 
   renderWordList(result.userWords || []);
+
+  // Debug-nappi
+  const debugBtn = document.getElementById('debug-btn');
+  const debugStatus = document.getElementById('debug-status');
+
+  debugBtn.addEventListener('click', async () => {
+    debugBtn.disabled = true;
+    debugBtn.textContent = '⏳ Kerätään...';
+    debugStatus.style.display = 'none';
+
+    try {
+      const [{ result: json }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: false },
+        files: ['content/debug-collector.js'],
+      });
+
+      await navigator.clipboard.writeText(json);
+      debugStatus.textContent = '✓ Debug-tiedot kopioitu leikepöydälle';
+      debugStatus.style.display = 'block';
+    } catch (err) {
+      debugStatus.textContent = '✗ Virhe: ' + err.message;
+      debugStatus.style.color = '#d93025';
+      debugStatus.style.display = 'block';
+    } finally {
+      debugBtn.disabled = false;
+      debugBtn.textContent = '🔍 Debug';
+    }
+  });
 })();
