@@ -151,58 +151,92 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // Kontekstivalikko: korjausehdotukset
-// Content script lähettää sanan ennen oikean klikkauksen kontekstivalikkoa
-let pendingSuggestions = [];
+// Valikkorakenne luodaan kerran käynnistyksessä. Contextmenu-hetkellä
+// päivitetään vain otsikot update()-kutsulla (nopeampi kuin removeAll+create).
+chrome.contextMenus.removeAll(() => {
+  chrome.contextMenus.create({
+    id: 'voikko-header',
+    title: 'Voikko',
+    contexts: ['editable'],
+    enabled: false,
+    visible: false
+  });
+  for (let i = 0; i < 6; i++) {
+    chrome.contextMenus.create({
+      id: `voikko-sug-${i}`,
+      title: '-',
+      contexts: ['editable'],
+      visible: false
+    });
+  }
+  chrome.contextMenus.create({
+    id: 'voikko-separator',
+    type: 'separator',
+    contexts: ['editable'],
+    visible: false
+  });
+  chrome.contextMenus.create({
+    id: 'voikko-add-word',
+    title: 'Lisää sanastoon',
+    contexts: ['editable'],
+    visible: false
+  });
+});
+
+let currentSuggestions = [];
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'SET_CONTEXT_WORD') {
-    // Päivitä kontekstivalikko ehdotuksilla
+    currentSuggestions = msg.suggestions || [];
     updateContextMenu(msg.word, msg.suggestions);
     return false;
   }
 });
 
 function updateContextMenu(word, suggestions) {
-  // Poista vanhat
-  chrome.contextMenus.removeAll(() => {
-    if (!suggestions || suggestions.length === 0) return;
+  if (!word) {
+    chrome.contextMenus.update('voikko-header', { visible: false });
+    for (let i = 0; i < 6; i++) {
+      chrome.contextMenus.update(`voikko-sug-${i}`, { visible: false });
+    }
+    chrome.contextMenus.update('voikko-separator', { visible: false });
+    chrome.contextMenus.update('voikko-add-word', { visible: false });
+    return;
+  }
 
-    chrome.contextMenus.create({
-      id: 'voikko-header',
-      title: `Ehdotukset sanalle "${word}":`,
-      contexts: ['editable'],
-      enabled: false
-    });
+  const hasSuggestions = suggestions && suggestions.length > 0;
 
-    suggestions.slice(0, 6).forEach((sug, i) => {
-      chrome.contextMenus.create({
-        id: `voikko-sug-${i}`,
-        title: sug,
-        contexts: ['editable']
-      });
-    });
+  chrome.contextMenus.update('voikko-header', {
+    title: `Ehdotukset sanalle "${word}":`,
+    visible: hasSuggestions
+  });
 
-    chrome.contextMenus.create({
-      id: 'voikko-separator',
-      type: 'separator',
-      contexts: ['editable']
-    });
+  for (let i = 0; i < 6; i++) {
+    if (hasSuggestions && i < suggestions.length) {
+      chrome.contextMenus.update(`voikko-sug-${i}`, { title: suggestions[i], visible: true });
+    } else {
+      chrome.contextMenus.update(`voikko-sug-${i}`, { visible: false });
+    }
+  }
 
-    chrome.contextMenus.create({
-      id: 'voikko-add-word',
-      title: `Lisää "${word}" sanalistaan`,
-      contexts: ['editable']
-    });
+  chrome.contextMenus.update('voikko-separator', { visible: hasSuggestions });
+  chrome.contextMenus.update('voikko-add-word', {
+    title: `Lisää "${word}" sanalistaan`,
+    visible: true
   });
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId.startsWith('voikko-sug-')) {
-    // Lähetä korjaus content scriptille
+    const idx = parseInt(info.menuItemId.replace('voikko-sug-', ''), 10);
+    const suggestion = currentSuggestions[idx];
+    console.log('[Voikko] Ehdotus valittu:', suggestion, '| idx:', idx, '| tabId:', tab.id);
+    if (!suggestion) return;
     chrome.tabs.sendMessage(tab.id, {
       type: 'APPLY_SUGGESTION',
-      suggestion: info.menuItemTitle
-    });
+      suggestion
+    }).then(() => console.log('[Voikko] APPLY_SUGGESTION lähetetty'))
+      .catch(err => console.error('[Voikko] APPLY_SUGGESTION virhe:', err));
   } else if (info.menuItemId === 'voikko-add-word') {
     // Tallenna sana omaan sanalistaan
     chrome.tabs.sendMessage(tab.id, {

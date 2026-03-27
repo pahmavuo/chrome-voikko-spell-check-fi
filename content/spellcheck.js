@@ -24,6 +24,12 @@
   // Tallenna missä sanassa kursori on kontekstivalikkoa varten
   let contextWord = null;
   let contextSuggestions = [];
+  let contextElement = null;
+  let contextWordStart = -1;
+  let contextWordEnd = -1;
+
+  // Pidä service worker hereillä pingillä, jotta kontekstivalikko päivittyy ajoissa
+  setInterval(() => chrome.runtime.sendMessage({ type: 'PING' }).catch(() => {}), 20000);
 
   // --- Apufunktiot ---
   // Huom: extractWordPositions, escapeHtml, escapeAttr ja buildOverlayHtml
@@ -131,7 +137,7 @@
       if (errorSet.has(word)) {
         const suggestions = errorSet.get(word);
         const sugStr = suggestions.slice(0, 6).join('|');
-        html += `<mark class="${ERROR_CLASS}" data-word="${escapeAttr(word)}" data-suggestions="${escapeAttr(sugStr)}">${escapeHtml(word)}</mark>`;
+        html += `<mark class="${ERROR_CLASS}" data-word="${escapeAttr(word)}" data-suggestions="${escapeAttr(sugStr)}" data-start="${start}" data-end="${end}">${escapeHtml(word)}</mark>`;
       } else {
         html += escapeHtml(word);
       }
@@ -362,60 +368,54 @@
 
   // --- Kontekstivalikko ---
 
-  document.addEventListener('contextmenu', (e) => {
-    const target = e.target;
-    contextWord = null;
-    contextSuggestions = [];
+  // Havaittu sana hiiren alla — päivitetään hoverilla etukäteen
+  let lastHoveredWord = null;
 
-    // Tarkista onko kohdistus virheellisen sanan päällä (fallback mark-elementti)
+  function detectWordAtPoint(x, y, target) {
+    // contenteditable fallback mark
     if (target.classList && target.classList.contains(ERROR_CLASS)) {
-      contextWord = target.dataset.word;
-      contextSuggestions = (target.dataset.suggestions || '').split('|').filter(Boolean);
-    } else {
-      // textarea/input: hae sana kursoriposition perusteella
-      const activeEl = document.activeElement;
-      if (activeEl && trackedElements.has(activeEl) && activeEl.value !== undefined) {
-        const cursorPos = activeEl.selectionStart;
-        const wordPositions = extractWordPositions(activeEl.value);
-        for (const { word, start, end } of wordPositions) {
-          if (cursorPos >= start && cursorPos <= end) {
-            const info = trackedElements.get(activeEl);
-            if (info && info.overlay) {
-              const mark = info.overlay.querySelector(`.${ERROR_CLASS}[data-word="${CSS.escape(word)}"]`);
-              if (mark) {
-                contextWord = word;
-                contextSuggestions = (mark.dataset.suggestions || '').split('|').filter(Boolean);
-              }
-            }
-            break;
-          }
+      return {
+        word: target.dataset.word,
+        suggestions: (target.dataset.suggestions || '').split('|').filter(Boolean)
+      };
+    }
+
+    // textarea/input: tarkista overlay-markit koordinaateilla
+    const info = trackedElements.get(target);
+    if (info && info.overlay) {
+      const marks = info.overlay.querySelectorAll(`.${ERROR_CLASS}`);
+      for (const mark of marks) {
+        const rect = mark.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          return {
+            word: mark.dataset.word,
+            suggestions: (mark.dataset.suggestions || '').split('|').filter(Boolean),
+            element: target,
+            start: parseInt(mark.dataset.start, 10),
+            end: parseInt(mark.dataset.end, 10)
+          };
         }
       }
+    }
 
-      // contenteditable: hae sana hiiren osoittimen kohdalta CSS Highlight rangeistä
-      if (!contextWord && highlightSupported) {
-        const caretRange = document.caretRangeFromPoint(e.clientX, e.clientY);
-        if (caretRange) {
-          // Etsi mikä tracked contenteditable-elementti on kyseessä
-          let ceEl = target;
-          while (ceEl && ceEl !== document.body) {
-            const info = trackedElements.get(ceEl);
-            if (info && info.type === 'contenteditable') break;
-            ceEl = ceEl.parentElement;
-          }
-          if (ceEl && trackedElements.has(ceEl)) {
-            const errorMap = ceErrorRanges.get(ceEl);
-            if (errorMap) {
-              for (const [word, { suggestions, ranges }] of errorMap) {
-                for (const range of ranges) {
-                  if (range.compareBoundaryPoints(Range.START_TO_END, caretRange) >= 0 &&
-                      range.compareBoundaryPoints(Range.END_TO_START, caretRange) <= 0) {
-                    contextWord = word;
-                    contextSuggestions = suggestions.slice(0, 6);
-                    break;
-                  }
+    // contenteditable + CSS Highlight API
+    if (highlightSupported) {
+      const caretRange = document.caretRangeFromPoint(x, y);
+      if (caretRange) {
+        let ceEl = target;
+        while (ceEl && ceEl !== document.body) {
+          if (trackedElements.has(ceEl) && trackedElements.get(ceEl).type === 'contenteditable') break;
+          ceEl = ceEl.parentElement;
+        }
+        if (ceEl && trackedElements.has(ceEl)) {
+          const errorMap = ceErrorRanges.get(ceEl);
+          if (errorMap) {
+            for (const [word, { suggestions, ranges }] of errorMap) {
+              for (const range of ranges) {
+                if (range.compareBoundaryPoints(Range.START_TO_END, caretRange) >= 0 &&
+                    range.compareBoundaryPoints(Range.END_TO_START, caretRange) <= 0) {
+                  return { word, suggestions: suggestions.slice(0, 6), element: ceEl, start: -1, end: -1 };
                 }
-                if (contextWord) break;
               }
             }
           }
@@ -423,47 +423,59 @@
       }
     }
 
-    if (contextWord) {
-      chrome.runtime.sendMessage({
-        type: 'SET_CONTEXT_WORD',
-        word: contextWord,
-        suggestions: contextSuggestions
-      });
-    }
+    return null;
+  }
+
+  // Hover: päivitä kontekstivalikko etukäteen kun hiiri menee virhesanan päälle
+  document.addEventListener('mousemove', (e) => {
+    const result = detectWordAtPoint(e.clientX, e.clientY, e.target);
+    const word = result ? result.word : null;
+    if (word === lastHoveredWord) return;
+    lastHoveredWord = word;
+    chrome.runtime.sendMessage({
+      type: 'SET_CONTEXT_WORD',
+      word,
+      suggestions: result ? result.suggestions : []
+    }).catch(() => {});
+  });
+
+  // mousedown: päivitä contextWord klikkaushetkellä (varmuuden vuoksi)
+  document.addEventListener('mousedown', (e) => {
+    if (e.button !== 2) return;
+    const result = detectWordAtPoint(e.clientX, e.clientY, e.target);
+    contextWord = result ? result.word : null;
+    contextSuggestions = result ? result.suggestions : [];
+    contextElement = result ? result.element : null;
+    contextWordStart = result ? result.start : -1;
+    contextWordEnd = result ? result.end : -1;
+    log('mousedown oikea nappi — contextWord:', contextWord, 'element:', contextElement, 'start:', contextWordStart, 'end:', contextWordEnd);
   });
 
   // Kuuntele korjausehdotuksen valintaa
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === 'APPLY_SUGGESTION') {
       applySuggestion(msg.suggestion);
     } else if (msg.type === 'GET_CONTEXT_WORD') {
-      return contextWord;
+      sendResponse({ word: contextWord });
     }
   });
 
   function applySuggestion(suggestion) {
-    if (!contextWord) return;
+    log('applySuggestion:', suggestion, '| contextWord:', contextWord, '| contextElement:', contextElement, '| start:', contextWordStart, 'end:', contextWordEnd);
+    if (!contextWord || !contextElement) return;
 
-    const activeEl = document.activeElement;
-    if (!activeEl) return;
+    const el = contextElement;
 
-    if (activeEl.value !== undefined) {
-      // textarea tai input
-      const text = activeEl.value;
-      const cursorPos = activeEl.selectionStart;
-      const wordPositions = extractWordPositions(text);
-
-      for (const { word, start, end } of wordPositions) {
-        if (word === contextWord && cursorPos >= start && cursorPos <= end) {
-          activeEl.value = text.slice(0, start) + suggestion + text.slice(end);
-          activeEl.setSelectionRange(start + suggestion.length, start + suggestion.length);
-          scheduleCheck(activeEl);
-          break;
-        }
-      }
-    } else if (activeEl.isContentEditable) {
+    if (el.value !== undefined && contextWordStart >= 0) {
+      // textarea tai input — käytetään tallennettua sijaintia
+      const text = el.value;
+      el.value = text.slice(0, contextWordStart) + suggestion + text.slice(contextWordEnd);
+      el.setSelectionRange(contextWordStart + suggestion.length, contextWordStart + suggestion.length);
+      el.focus();
+      scheduleCheck(el);
+    } else if (el.isContentEditable) {
       // contenteditable: korvaa virheellinen sana käyttäen tallennettuja Range-objekteja
-      const errorMap = ceErrorRanges.get(activeEl);
+      const errorMap = ceErrorRanges.get(el);
       const entry = errorMap && errorMap.get(contextWord);
       if (entry && entry.ranges.length > 0) {
         const range = entry.ranges[0];
@@ -471,12 +483,15 @@
         selection.removeAllRanges();
         selection.addRange(range);
         document.execCommand('insertText', false, suggestion);
-        scheduleCheck(activeEl);
+        scheduleCheck(el);
       }
     }
 
     contextWord = null;
     contextSuggestions = [];
+    contextElement = null;
+    contextWordStart = -1;
+    contextWordEnd = -1;
   }
 
   // --- Sivuston pois päältä kytkeminen ---
